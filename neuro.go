@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
-	"gonum.org/v1/gonum/mat"
+	"math"
 	"math/rand"
 	"time"
+
+	"gonum.org/v1/gonum/mat"
 )
 
-// Sigmoid function and its derivative
 func sigmoid(x float64) float64 {
 	return 1.0 / (1.0 + math.Exp(-x))
 }
@@ -16,8 +17,7 @@ func sigmoidDerivative(x float64) float64 {
 	return x * (1 - x)
 }
 
-// Random weight initialization
-func randomWeight(rows, cols int) *mat.Dense {
+func randomWeights(rows, cols int) *mat.Dense {
 	data := make([]float64, rows*cols)
 	for i := range data {
 		data[i] = rand.Float64()*2 - 1 // random float between -1 and 1
@@ -28,8 +28,8 @@ func randomWeight(rows, cols int) *mat.Dense {
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
-	// Training data: 1x1 multiplication table
-	inputData := mat.NewDense(9, 2, []float64{
+	// 1x1 multiplication table (1 to 3)
+	inputs := mat.NewDense(9, 2, []float64{
 		1, 1,
 		1, 2,
 		1, 3,
@@ -40,81 +40,78 @@ func main() {
 		3, 2,
 		3, 3,
 	})
-	expectedOutput := mat.NewDense(9, 1, []float64{
-		1,
-		2,
-		3,
-		2,
-		4,
-		6,
-		3,
-		6,
-		9,
+	expected := mat.NewDense(9, 1, []float64{
+		1, 2, 3,
+		2, 4, 6,
+		3, 6, 9,
 	})
 
-	// Initialize neural network with random weights
-	inputLayerNeurons, hiddenLayerNeurons, outputLayerNeurons := 2, 3, 1
-	hiddenLayerWeights := randomWeight(hiddenLayerNeurons, inputLayerNeurons)
-	outputLayerWeights := randomWeight(outputLayerNeurons, hiddenLayerNeurons)
+	// Neural network dimensions
+	inputLayer, hiddenLayer, outputLayer := 2, 3, 1
 
+	// Initialize random weights
+	hiddenWeights := randomWeights(hiddenLayer, inputLayer)
+	outputWeights := randomWeights(outputLayer, hiddenLayer)
+
+	// Hyperparameters
 	learningRate := 0.5
-	epochs := 10000
+	epochs := 20000
 
-	// Training loop
 	for epoch := 0; epoch < epochs; epoch++ {
-		// Forward pass
-		hiddenLayerInput := new(mat.Dense)
-		hiddenLayerInput.Mul(inputData, hiddenLayerWeights.T())
-		hiddenLayerActivations := new(mat.Dense)
-		hiddenLayerActivations.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, hiddenLayerInput)
+		// Forward Pass
+		hiddenInput := new(mat.Dense)
+		hiddenInput.Mul(inputs, hiddenWeights.T())
+		hiddenOutput := new(mat.Dense)
+		hiddenOutput.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, hiddenInput)
 
-		outputLayerInput := new(mat.Dense)
-		outputLayerInput.Mul(hiddenLayerActivations, outputLayerWeights.T())
+		outputInput := new(mat.Dense)
+		outputInput.Mul(hiddenOutput, outputWeights.T())
 		output := new(mat.Dense)
-		output.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, outputLayerInput)
+		output.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, outputInput)
 
-		// Calculate error
+		// Calculate the error
 		error := new(mat.Dense)
-		error.Sub(expectedOutput, output)
-		dOutput := new(mat.Dense)
-		dOutput.Apply(func(_, _ int, v float64) float64 { return sigmoidDerivative(v) }, output)
-		errorOutputLayer := new(mat.Dense)
-		errorOutputLayer.MulElem(error, dOutput)
+		error.Sub(expected, output)
 
 		// Backpropagation
+		dOutput := new(mat.Dense)
+		dOutput.Apply(func(_, _ int, v float64) float64 { return sigmoidDerivative(v) }, output)
+		outputError := new(mat.Dense)
+		outputError.MulElem(error, dOutput)
+
 		hiddenLayerT := new(mat.Dense)
-		hiddenLayerT.Mul(outputLayerWeights, errorOutputLayer.T())
+		hiddenLayerT.Mul(outputWeights, outputError.T())
+
 		dHiddenLayer := new(mat.Dense)
-		dHiddenLayer.Apply(func(_, _ int, v float64) float64 { return sigmoidDerivative(v) }, hiddenLayerActivations)
-		errorHiddenLayer := new(mat.Dense)
-		errorHiddenLayer.MulElem(dHiddenLayer, hiddenLayerT)
+		dHiddenLayer.Apply(func(_, _ int, v float64) float64 { return sigmoidDerivative(v) }, hiddenOutput)
+		hiddenError := new(mat.Dense)
+		hiddenError.MulElem(dHiddenLayer, hiddenLayerT.T())
 
-		// Update weights
-		outputLayerWeightsAdj := new(mat.Dense)
-		outputLayerWeightsAdj.Mul(errorOutputLayer.T(), hiddenLayerActivations)
-		outputLayerWeightsAdj.Scale(learningRate, outputLayerWeightsAdj)
-		outputLayerWeights.Add(outputLayerWeights, outputLayerWeightsAdj.T())
+		// Update the weights
+		hiddenErrorT := new(mat.Dense)
+		hiddenErrorT.Mul(hiddenError.T(), inputs)
+		hiddenErrorT.Scale(learningRate, hiddenErrorT)
+		hiddenWeights.Add(hiddenWeights, hiddenErrorT.T())
 
-		hiddenLayerWeightsAdj := new(mat.Dense)
-		hiddenLayerWeightsAdj.Mul(errorHiddenLayer.T(), inputData)
-		hiddenLayerWeightsAdj.Scale(learningRate, hiddenLayerWeightsAdj)
-		hiddenLayerWeights.Add(hiddenLayerWeights, hiddenLayerWeightsAdj.T())
+		outputErrorT := new(mat.Dense)
+		outputErrorT.Mul(outputError.T(), hiddenOutput)
+		outputErrorT.Scale(learningRate, outputErrorT)
+		outputWeights.Add(outputWeights, outputErrorT.T())
 	}
 
 	// Predictions after training
-	fmt.Println("Predictions after training")
-	hiddenLayerInput := new(mat.Dense)
-	hiddenLayerInput.Mul(inputData, hiddenLayerWeights.T())
-	hiddenLayerActivations := new(mat.Dense)
-	hiddenLayerActivations.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, hiddenLayerInput)
+	hiddenInput := new(mat.Dense)
+	hiddenInput.Mul(inputs, hiddenWeights.T())
+	hiddenOutput := new(mat.Dense)
+	hiddenOutput.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, hiddenInput)
 
-	outputLayerInput := new(mat.Dense)
-	outputLayerInput.Mul(hiddenLayerActivations, outputLayerWeights.T())
+	outputInput := new(mat.Dense)
+	outputInput.Mul(hiddenOutput, outputWeights.T())
 	output := new(mat.Dense)
-	output.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, outputLayerInput)
-	output.Apply(func(_, _ int, v float64) float64 { return math.Round(v*9) / 1 }, output)
+	output.Apply(func(_, _ int, v float64) float64 { return sigmoid(v) }, outputInput)
 
-	outputData := mat.Formatted(output, mat.Prefix("    "))
-	fmt.Printf("output = %v\n", outputData)
+	output.Apply(func(_, _ int, v float64) float64 { return math.Round(v * 10) }, output)
+
+	fmt.Println("Predictions after training:")
+	fmt.Println(mat.Formatted(output, mat.Prefix("    ")))
 }
-
